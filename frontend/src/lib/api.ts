@@ -28,10 +28,26 @@ export type IndicesResponse = {
   updatedAt: number
 }
 
-const REFRESH_MS = 120_000
+const REFRESH_MS = 60_000
+
+function readCache<T>(path: string): T | null {
+  try {
+    return JSON.parse(localStorage.getItem(`cache:${path}`) ?? 'null')
+  } catch {
+    return null
+  }
+}
+
+function writeCache(path: string, value: unknown) {
+  try {
+    localStorage.setItem(`cache:${path}`, JSON.stringify(value))
+  } catch {
+    // storage full or blocked; the in-memory copy is enough
+  }
+}
 
 export function useApi<T>(path: string) {
-  const [data, setData] = useState<T | null>(null)
+  const [data, setData] = useState<T | null>(() => readCache<T>(path))
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -40,7 +56,9 @@ export function useApi<T>(path: string) {
     try {
       const res = await fetch(path)
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-      setData(await res.json())
+      const json = await res.json()
+      setData(json)
+      writeCache(path, json)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

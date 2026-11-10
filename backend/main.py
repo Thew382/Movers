@@ -1,16 +1,17 @@
+import logging
 import math
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
-app = FastAPI(title="Movers API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
-
-CACHE_TTL = 120
-_cache: dict[str, tuple[float, object]] = {}
+REFRESH_SECONDS = 60
+MOVERS_COUNT = 10
 
 INDICES = {
     "^GSPC": "S&P 500",
@@ -20,14 +21,10 @@ INDICES = {
     "^VIX": "VIX",
 }
 
-
-def cached(key, fn):
-    hit = _cache.get(key)
-    if hit and time.time() - hit[0] < CACHE_TTL:
-        return hit[1]
-    value = fn()
-    _cache[key] = (time.time(), value)
-    return value
+log = logging.getLogger("uvicorn.error")
+pool = ThreadPoolExecutor(32)
+_cache: dict[str, dict] = {}
+_ready = {"movers": threading.Event(), "indices": threading.Event()}
 
 
 def clean(x):
@@ -36,22 +33,14 @@ def clean(x):
     return round(float(x), 4)
 
 
-def sparklines(symbols: list[str]) -> dict[str, list[float]]:
-    if not symbols:
-        return {}
-    df = yf.download(symbols, period="1d", interval="5m", progress=False, group_by="column", auto_adjust=False)
-    if df.empty:
-        return {}
-    closes = df["Close"]
-    out = {}
-    for s in symbols:
-        if s in closes:
-            out[s] = [round(float(v), 4) for v in closes[s].dropna().tolist()]
-    return out
+def intraday(symbol: str):
+    ticker = yf.Ticker(symbol)
+    closes = ticker.history(period="1d", interval="5m")["Close"].dropna()
+    return [round(float(v), 4) for v in closes], ticker.history_metadata
 
 
-def screen(name: str, count: int) -> list[dict]:
-    quotes = yf.screen(name, count=count)["quotes"]
+def screen(name: str) -> list[dict]:
+    quotes = yf.screen(name, count=MOVERS_COUNT)["quotes"]
     return [
         {
             "symbol": q["symbol"],
@@ -68,25 +57,21 @@ def screen(name: str, count: int) -> list[dict]:
     ]
 
 
-def build_movers(count: int):
-    with ThreadPoolExecutor(3) as pool:
-        gainers, losers, active = pool.map(
-            lambda n: screen(n, count), ["day_gainers", "day_losers", "most_actives"]
-        )
-    symbols = list({q["symbol"] for q in gainers + losers + active})
-    spark = sparklines(symbols)
-    for q in gainers + losers + active:
-        q["spark"] = spark.get(q["symbol"], [])
+def build_movers():
+    gainers, losers, active = pool.map(screen, ["day_gainers", "day_losers", "most_actives"])
+    rows = gainers + losers + active
+    symbols = list({q["symbol"] for q in rows})
+    spark = dict(zip(symbols, (s for s, _ in pool.map(intraday, symbols))))
+    for q in rows:
+        q["spark"] = spark[q["symbol"]]
     return {"gainers": gainers, "losers": losers, "active": active, "updatedAt": int(time.time())}
 
 
 def build_indices():
-    spark = sparklines(list(INDICES))
     out = []
-    for symbol, name in INDICES.items():
-        info = yf.Ticker(symbol).fast_info
-        price = clean(info.last_price)
-        prev = clean(info.previous_close)
+    for (symbol, name), (spark, meta) in zip(INDICES.items(), pool.map(intraday, INDICES)):
+        price = clean(meta.get("regularMarketPrice"))
+        prev = clean(meta.get("chartPreviousClose"))
         change = price - prev if price and prev else None
         out.append(
             {
@@ -95,24 +80,50 @@ def build_indices():
                 "price": price,
                 "change": clean(change),
                 "changePercent": clean(change / prev * 100) if change is not None else None,
-                "spark": spark.get(symbol, []),
+                "spark": spark,
             }
         )
     return {"indices": out, "updatedAt": int(time.time())}
 
 
-@app.get("/api/movers")
-def movers(count: int = 10):
-    count = max(1, min(count, 25))
+def refresh(key: str, build):
     try:
-        return cached(f"movers:{count}", lambda: build_movers(count))
-    except Exception as e:
-        raise HTTPException(502, f"Upstream data error: {e}")
+        _cache[key] = build()
+        _ready[key].set()
+    except Exception:
+        log.exception("Refreshing %s failed; serving previous data", key)
+
+
+def refresher():
+    while True:
+        jobs = [pool.submit(refresh, "movers", build_movers), pool.submit(refresh, "indices", build_indices)]
+        for job in jobs:
+            job.result()
+        time.sleep(REFRESH_SECONDS)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=refresher, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Movers API", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+
+
+def serve(key: str):
+    if not _ready[key].wait(timeout=30):
+        raise HTTPException(503, "Market data is still loading, try again shortly")
+    return _cache[key]
+
+
+@app.get("/api/movers")
+def movers():
+    return serve("movers")
 
 
 @app.get("/api/indices")
 def indices():
-    try:
-        return cached("indices", build_indices)
-    except Exception as e:
-        raise HTTPException(502, f"Upstream data error: {e}")
+    return serve("indices")

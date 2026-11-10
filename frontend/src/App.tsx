@@ -52,7 +52,7 @@ function Section({ id, children }: { id?: string; children: ReactNode }) {
 
 export default function App() {
   const [introDone, setIntroDone] = useState(false)
-  const movers = useApi<MoversResponse>('/api/movers?count=10')
+  const movers = useApi<MoversResponse>('/api/movers')
   const indices = useApi<IndicesResponse>('/api/indices')
   const finishIntro = useCallback(() => setIntroDone(true), [])
 
