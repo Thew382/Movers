@@ -36,7 +36,7 @@ export function Header({ onRefresh, refreshing }: { onRefresh: () => void; refre
         scrolled ? 'border-line bg-canvas/70 backdrop-blur-xl' : 'border-transparent'
       }`}
     >
-      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6 lg:px-10">
         <div className="flex items-center gap-8">
           <a href="#" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight">
             <Logo />

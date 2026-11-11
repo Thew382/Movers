@@ -76,7 +76,7 @@ export default function App() {
         <>
           <Header onRefresh={refresh} refreshing={movers.loading || indices.loading} />
 
-          <main className="mx-auto max-w-6xl px-4 sm:px-6">
+          <main className="px-4 sm:px-6 lg:px-10">
             <section id="overview" className="pb-10 pt-16 sm:pt-24">
               <Reveal>
                 <span className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.02] py-1 pl-1 pr-3 text-xs text-muted">
@@ -173,7 +173,7 @@ export default function App() {
           </main>
 
           <footer className="mt-16 border-t border-line">
-            <div className="mx-auto flex max-w-6xl flex-col justify-between gap-2 px-4 py-8 text-xs text-faint sm:flex-row sm:px-6">
+            <div className="flex flex-col justify-between gap-2 px-4 py-8 text-xs text-faint sm:flex-row sm:px-6 lg:px-10">
               <span>Movers — a daily market snapshot</span>
               <span>Data via yfinance. Quotes may be delayed. Not investment advice.</span>
             </div>

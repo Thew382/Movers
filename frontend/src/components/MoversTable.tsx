@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowUpRight, ChevronDown } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import type { Mover } from '../lib/api'
 import { fmtCompact, fmtPrice } from '../lib/format'
 import { Card, ChangePill, EASE, Monogram, Sparkline } from './primitives'
@@ -14,7 +14,6 @@ type Props = {
 }
 
 export function MoversTable({ id, title, subtitle, movers, delay = 0 }: Props) {
-  const layoutGroup = useId()
   const [hovered, setHovered] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
 
@@ -52,11 +51,7 @@ export function MoversTable({ id, title, subtitle, movers, delay = 0 }: Props) {
                   onMouseEnter={() => setHovered(m.symbol)}
                 >
                   {(hovered === m.symbol || expanded) && (
-                    <motion.div
-                      layoutId={expanded ? undefined : `row-${layoutGroup}`}
-                      className="absolute inset-0 rounded-xl bg-white/[0.04] ring-1 ring-inset ring-white/[0.04]"
-                      transition={{ type: 'spring', stiffness: 500, damping: 40 }}
-                    />
+                    <div className="absolute inset-0 rounded-xl bg-white/[0.04] ring-1 ring-inset ring-white/[0.04]" />
                   )}
                   <button
                     onClick={() => setOpen(expanded ? null : m.symbol)}
